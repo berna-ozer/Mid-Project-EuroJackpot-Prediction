@@ -9,8 +9,21 @@ from sklearn.linear_model import LinearRegression
 import time
 import random
 
+year_list = [2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024]
+
+def fetch_dates(year):
+    # Retrieve all dates for each year using the URL and append them to a list
+    url = 'https://www.lottonumbers.com/eurojackpot-results-' + str(year)
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content)
+    date_box = soup.find('table', attrs= {'class':'lotteryTable'}).find('tbody').find_all('a')
+    date_list = []
+    for date in date_box:
+        date_list.append(date.get('href').split('/')[3])
+
+    return date_list
+
 # Data Function Definitions
-@st.cache_data
 def fetch_last_draw():
     url = 'https://www.lottonumbers.com/eurojackpot-results-' + str(2024)
     response = requests.get(url)
@@ -18,7 +31,9 @@ def fetch_last_draw():
     date_box = soup.find('table', attrs= {'class':'lotteryTable'}).find('tbody').find('a')
     date = date_box.get('href').split('/')[3]
     # print(date_list)
-            
+    return fetch_draw(date)
+
+def fetch_draw(date):     
     # Retrieve 'Draw' information using URL
     url = 'https://www.lottonumbers.com/eurojackpot/results/' + date
     response = requests.get(url)
@@ -44,10 +59,15 @@ def fetch_last_draw():
     draw_df['Total Winners'] = pd.to_numeric(draw_df['Total Winners'], errors='coerce').astype('Int64')
     draw_df['Per Winner Prize'] = draw_df['Per Winner Prize'].str.replace('[^0-9.]', '', regex=True).astype(float)
     draw_df['Date'] = pd.to_datetime(draw_df['Date'])
-    latest_remainder = draw_df.loc[(draw_df['Total Winners'] == 0) & (draw_df['Prize Tier'] == '5+2'), 'Per Winner Prize'].iloc[-1] if len(draw_df) > 0 else 10000000.0
+    
+    jackpot_df = draw_df.loc[(draw_df['Total Winners'] == 0) & (draw_df['Prize Tier'] == '5+2'), 'Per Winner Prize']
+    if not jackpot_df.empty:
+        latest_remainder = jackpot_df.iloc[-1]
+    else:
+        latest_remainder = 10000000.0
+        
     return draw_df, latest_remainder
 
-@st.cache_data
 def calculate_last_draw_summary(draw_df):
     winning_probabilities = {
         '5+2': 1/139838160,
@@ -94,7 +114,7 @@ def nextDrawDate():
         return date + timedelta(days=target_weekday)
 
     # Assuming you want to calculate this for the first date in your DataFrame
-    selected_date = pd.to_datetime(summary_df['Date'][0])
+    selected_date = pd.to_datetime(st.session_state.summary_df['Date'][0])
 
     # Check the day of the week of the selected date
     if selected_date.weekday() == 1:  # If it's a Tuesday
@@ -165,6 +185,7 @@ def estimate_draws_need_for_target(target_total_profit, latest_remainder, always
     predicted_total_profit_latest = model_profit.predict([[latest_remainder_jackpot, estimated_total_deposit, estimated_jackpot_prize]])[0]
 
     # Initialize variables for the iterative process
+    draw_limit = 10
     predicted_profit = 0.0
     number_of_draws = 0
 
@@ -188,7 +209,7 @@ def estimate_draws_need_for_target(target_total_profit, latest_remainder, always
     # Iterate until the target total profit is reached or exceeded
 
     # Loop until the target profit is reached
-    while predicted_profit < target_total_profit:
+    while predicted_profit < target_total_profit and number_of_draws < draw_limit :
         # Predict 'Total Deposit' and 'Jackpot Prize' for the current 'Remainder Jackpot'
         estimated_total_deposit = model_deposit.predict([[latest_remainder_jackpot]])[0]
         estimated_jackpot_prize = model_jackpot.predict([[latest_remainder_jackpot]])[0]
@@ -210,7 +231,8 @@ def estimate_draws_need_for_target(target_total_profit, latest_remainder, always
 
     # Output the number of draws needed to reach the target total profit
     print(f"Number of draws needed to reach a total profit of {target_total_profit}: {number_of_draws}")
-    return number_of_draws
+    success = target_total_profit <= predicted_profit
+    return number_of_draws, success
 
 @st.cache_data
 def read_previous_data():
@@ -218,14 +240,21 @@ def read_previous_data():
 
 # Data Codes Runs 
 
-draw_df, latest_remainder = fetch_last_draw()
-summary_df, draw_df = calculate_last_draw_summary(draw_df)
 prediction_df = read_previous_data()
 
 # Streamlit Codes
 
-def show_last_draw_profit(summary_df, draw_df):
-    if summary_df.empty or draw_df.empty:
+def show_last_draw_profit():
+    if st.session_state.last_draw_fetched == False:
+        with st.spinner("Fetching last draw..."):
+            time.sleep(2.0)
+            draw_df, st.session_state.latest_remainder = fetch_last_draw()
+            st.session_state.summary_df, st.session_state.draw_df = calculate_last_draw_summary(draw_df)
+            st.session_state.last_draw_fetched = True
+    
+    summary_df = st.session_state.summary_df
+    
+    if summary_df.empty:
         st.write("No data available for the last draw.")
         return
 
@@ -251,31 +280,117 @@ def show_last_draw_profit(summary_df, draw_df):
             st.metric(label="Total Deposit", value=total_deposit)
         with col3:
             st.metric(label="Total Potential Profit", value=total_potential_profit)
-            
+
 def show_next_draw_section():
     st.write("## Next Draw")
-
+    
     date_text = nextDrawDate().strftime('%Y-%m-%d')
     st.write(f"### Date: {date_text}")
 
     button_container = st.empty()
-    
-    if st.session_state.show_calculate_button == True and button_container.button("Predict Potential Profit"):
-        button_container.empty()
-        st.session_state.show_calculate_button = False
-        st.session_state.show_next_draw = True
-    
-    if st.session_state.show_next_draw == True:
+
+    if st.session_state.show_calculate_button:
+        if button_container.button("Predict Potential Profit"):
+            st.session_state.show_calculate_button = False
+            st.session_state.show_next_draw = True
+            button_container.empty()
+            
+    if st.session_state.show_next_draw:
         show_next_draw_predictions() 
+        
 
 def show_next_draw_predictions():
-    with st.spinner('Predicting...'):
-        time.sleep(1)
-        total_deposit, jackpot, potential_profit = predict_next_draw(prediction_df, latest_remainder)
-        total_deposit = f"€{total_deposit:,.0f}"
-        jackpot_prize = f"€{jackpot:,.0f}"
-        total_potential_profit = f"€{potential_profit:,.2f}"
+    if not st.session_state.next_draw_calculated:
+        with st.spinner('Predicting...'):
+            # Sleep for loading 
+            time.sleep(3)
+            st.session_state.total_deposit, st.session_state.jackpot, st.session_state.potential_profit = predict_next_draw(prediction_df, st.session_state.latest_remainder)
+            st.session_state.next_draw_calculated = True
+    
+    total_deposit = f"€{st.session_state.total_deposit:,.0f}"
+    jackpot_prize = f"€{st.session_state.jackpot:,.0f}"
+    total_potential_profit = f"€{st.session_state.potential_profit:,.2f}"
+    
+    container = st.empty()
+    lucky = st.session_state.potential_profit > 1.9
+    if st.session_state.celebrated == False:
+        if lucky:
+            container.balloons()
+        else:
+            container.snow()
+        st.session_state.celebrated = True
+    else:
+        container.empty()
+        
+    if st.session_state.potential_profit > 1.9: 
+        st.success('You are on lucky day!', icon='🍀')
+    else:
+        st.warning("Maybe it's better to wait the next time", icon='🤔')
+        
 
+    col1, col2, col3 = st.columns(3)
+        
+    with col1:
+        st.metric(label="Jackpot Prize", value=jackpot_prize)
+    with col2:
+        st.metric(label="Total Deposit", value=total_deposit)
+    with col3:
+        st.metric(label="Total Potential Profit", value=total_potential_profit)
+
+def show_predict_draw_count_section():
+    st.write("## Target Profit Prediction")
+    st.write("Estimates how many draws later your target value will possibly be reached.")
+    
+    form = st.form('target_profit_form')
+    always_rollover = form.toggle('Jackpot Always Rollovers')
+    target_profit = form.number_input('Target Potential Profit:')    
+    submitted = form.form_submit_button("Submit")
+        
+    if submitted:
+        with st.spinner("Estimation running..."):
+            time.sleep(2.0)
+            number_of_draws, success = estimate_draws_need_for_target(target_profit, st.session_state.latest_remainder, always_rollover)
+        if success:
+            st.success(f"### 😎 {number_of_draws} draws needed to reach the target profit!")
+        else:
+            st.error(f"### 😔 It's not likely to reach the target in limit of {number_of_draws} draws")            
+    
+
+def show_previous_draws():
+    year = int(st.selectbox('Select Year', [str(year) for year in sorted(year_list, reverse=True)]))
+    with st.spinner('Fetching draw dates...'):
+        time.sleep(1.0)
+        date_list = fetch_dates(year)
+    form = st.form('date_form')
+    date = form.selectbox('Select Date', date_list)
+    submit = form.form_submit_button('Fetch')
+    if submit:
+        show_draw_stats(date)
+
+def show_draw_stats(date):
+    with st.spinner("Fetching the draw..."):
+        time.sleep(2.0)
+        draw_df, _ = fetch_draw(date)
+        summary_df, _ = calculate_last_draw_summary(draw_df)
+    
+    if summary_df.empty:
+        st.write("No data available for this draw.")
+        return
+
+    # Ensure Date is in the correct format
+    summary_df['Date'] = pd.to_datetime(summary_df['Date']).dt.date
+
+    # Displaying the summary in a more appealing format
+    st.write("## Draw Summary")
+
+    # Assuming there's only one row in the summary_df
+    if len(summary_df) == 1:
+        date = summary_df.iloc[0]['Date']
+        total_potential_profit = f"€{summary_df.iloc[0]['Total Potential Profit']:,.2f}"
+        total_deposit = f"€{summary_df.iloc[0]['Total Deposit']:,.0f}"
+        jackpot_prize = f"€{summary_df.iloc[0]['Jackpot Prize']:,.0f}"
+
+        st.write(f"### Date: {date}")
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -285,36 +400,42 @@ def show_next_draw_predictions():
         with col3:
             st.metric(label="Total Potential Profit", value=total_potential_profit)
 
-def show_predict_draw_count_section():
-    st.write("## Target Profit Prediction")
-    st.write("Estimates how many draws later your target value will possibly be reached.")
-    with st.form('target_profit_form'):
-        always_rollover = st.toggle('Jackpot Always Rollovers')
-        target_profit = st.number_input('Target Potential Profit:')
-        
-        submitted = st.form_submit_button("Submit")
-        
-        if submitted:
-            with st.spinner("Estimation running..."):
-                number_of_draws = estimate_draws_need_for_target(target_profit, latest_remainder, always_rollover)
-                st.write(f"Number of draws needed to reach a total profit of {target_profit}: {number_of_draws}")
 
-
+# Assing initial session state variables
 if 'show_calculate_button' not in st.session_state:
     st.session_state.show_calculate_button = True
     
 if 'show_next_draw' not in st.session_state:
     st.session_state.show_next_draw = False
 
-    # Streamlit App
+if 'last_draw_fetched' not in st.session_state:
+    st.session_state.last_draw_fetched = False
+
+if 'next_draw_calculated' not in st.session_state:
+    st.session_state.next_draw_calculated = False
+
+if 'celebrated' not in st.session_state:
+    st.session_state.celebrated = False
+    
+# Streamlit App UI 
 st.title('EuroJackpot Lottery Analyzer')
 st.image('streamlit-header.png', caption='', use_column_width=True)
 
-with st.container(border=True):
-    show_last_draw_profit(summary_df, draw_df)
 
-with st.container(border=True):
-    show_next_draw_section()
+tab1, tab2, tab3, tab4 = st.tabs(['Last Draw', 'Next Draw', 'Previous Draws', 'Target Profit'])
 
-with st.container(border=True):
-    show_predict_draw_count_section()
+with tab1:
+    with st.container(border=True):
+        show_last_draw_profit()
+        
+with tab2:
+    with st.container(border=True):
+        show_next_draw_section()
+
+with tab3:
+    with st.container(border=True):
+        show_previous_draws()
+
+with tab4:
+    with st.container(border=True):
+        show_predict_draw_count_section() 
