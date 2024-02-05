@@ -1,10 +1,8 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import requests
 from bs4 import BeautifulSoup
-import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from sklearn.linear_model import LinearRegression
 import time
 import random
@@ -30,7 +28,6 @@ def fetch_last_draw():
     soup = BeautifulSoup(response.content)
     date_box = soup.find('table', attrs= {'class':'lotteryTable'}).find('tbody').find('a')
     date = date_box.get('href').split('/')[3]
-    # print(date_list)
     return fetch_draw(date)
 
 def fetch_draw(date):     
@@ -102,25 +99,20 @@ def calculate_last_draw_summary(draw_df):
     last_draw_df = total_potential_profit_draw.merge(total_deposit, on='Date')
     last_draw_df = last_draw_df.merge(big_df, on='Date')
 
-    return last_draw_df, draw_df
+    return last_draw_df
 
 @st.cache_data
 def nextDrawDate():
     def get_next_weekday(date, target_weekday):
-        """
-        date: datetime.date or datetime.datetime object
-        target_weekday: 0 for Monday, 1 for Tuesday, ..., 6 for Sunday
-        """
         return date + timedelta(days=target_weekday)
 
-    # Assuming you want to calculate this for the first date in your DataFrame
     selected_date = pd.to_datetime(st.session_state.summary_df['Date'][0])
 
     # Check the day of the week of the selected date
     if selected_date.weekday() == 1:  # If it's a Tuesday
-        return get_next_weekday(selected_date, 1)  # Next Tuesday
+        return get_next_weekday(selected_date, 3)  # Next Friday
     else:
-        return get_next_weekday(selected_date, 4)  # Next Friday
+        return get_next_weekday(selected_date, 4)  # Next Tuesday
     
 @st.cache_data
 def predict_next_draw(prediction_df, latest_remainder):
@@ -189,8 +181,6 @@ def estimate_draws_need_for_target(target_total_profit, latest_remainder, always
     predicted_profit = 0.0
     number_of_draws = 0
 
-    always_rollover = always_rollover
-
     # Function to estimate the next 'Remainder Jackpot'
     def next_remainder_jackpot(current_jackpot, deposit):
         if always_rollover:
@@ -236,11 +226,7 @@ def estimate_draws_need_for_target(target_total_profit, latest_remainder, always
 
 @st.cache_data
 def read_previous_data():
-    return pd.read_excel('Prediction.xlsx')
-
-# Data Codes Runs 
-
-prediction_df = read_previous_data()
+    return pd.read_excel('Data/Prediction.xlsx')
 
 # Streamlit Codes
 
@@ -249,7 +235,7 @@ def show_last_draw_profit():
         with st.spinner("Fetching last draw..."):
             time.sleep(2.0)
             draw_df, st.session_state.latest_remainder = fetch_last_draw()
-            st.session_state.summary_df, st.session_state.draw_df = calculate_last_draw_summary(draw_df)
+            st.session_state.summary_df = calculate_last_draw_summary(draw_df)
             st.session_state.last_draw_fetched = True
     
     summary_df = st.session_state.summary_df
@@ -311,23 +297,14 @@ def show_next_draw_predictions():
     jackpot_prize = f"€{st.session_state.jackpot:,.0f}"
     total_potential_profit = f"€{st.session_state.potential_profit:,.2f}"
     
-    container = st.empty()
-    lucky = st.session_state.potential_profit > 1.9
-    if st.session_state.celebrated == False:
-        if lucky:
-            container.balloons()
-        else:
-            container.snow()
-        st.session_state.celebrated = True
-    else:
-        container.empty()
-        
+                
     if st.session_state.potential_profit > 1.9: 
         st.success('You are on lucky day!', icon='🍀')
+        st.balloons()
     else:
         st.warning("Maybe it's better to wait the next time", icon='🤔')
+        st.snow()
         
-
     col1, col2, col3 = st.columns(3)
         
     with col1:
@@ -351,14 +328,14 @@ def show_predict_draw_count_section():
             time.sleep(2.0)
             number_of_draws, success = estimate_draws_need_for_target(target_profit, st.session_state.latest_remainder, always_rollover)
         if success:
-            st.success(f"### 😎 {number_of_draws} draws needed to reach the target profit!")
+            st.success(f"### 😎  {number_of_draws} draws needed to reach the target profit!")
         else:
-            st.error(f"### 😔 It's not likely to reach the target in limit of {number_of_draws} draws")            
+            st.error(f"### 😔  It's not likely to reach the target in limit of {number_of_draws} draws")            
     
 
 def show_previous_draws():
     year = int(st.selectbox('Select Year', [str(year) for year in sorted(year_list, reverse=True)]))
-    with st.spinner('Fetching draw dates...'):
+    with st.spinner('Loading draw dates...'):
         time.sleep(1.0)
         date_list = fetch_dates(year)
     form = st.form('date_form')
@@ -369,9 +346,9 @@ def show_previous_draws():
 
 def show_draw_stats(date):
     with st.spinner("Fetching the draw..."):
-        time.sleep(2.0)
+        time.sleep(1.0)
         draw_df, _ = fetch_draw(date)
-        summary_df, _ = calculate_last_draw_summary(draw_df)
+        summary_df = calculate_last_draw_summary(draw_df)
     
     if summary_df.empty:
         st.write("No data available for this draw.")
@@ -401,6 +378,10 @@ def show_draw_stats(date):
             st.metric(label="Total Potential Profit", value=total_potential_profit)
 
 
+# Data Codes Runs 
+
+prediction_df = read_previous_data()
+
 # Assing initial session state variables
 if 'show_calculate_button' not in st.session_state:
     st.session_state.show_calculate_button = True
@@ -419,7 +400,7 @@ if 'celebrated' not in st.session_state:
     
 # Streamlit App UI 
 st.title('EuroJackpot Lottery Analyzer')
-st.image('streamlit-header.png', caption='', use_column_width=True)
+st.image('Assets/streamlit-header.png', caption='', use_column_width=True)
 
 
 tab1, tab2, tab3, tab4 = st.tabs(['Last Draw', 'Next Draw', 'Previous Draws', 'Target Profit'])
