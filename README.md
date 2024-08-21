@@ -13,9 +13,28 @@ The Eurojackpot Prediction is a tool designed to help users evaluate the profita
 ## Features
 
 - **Last Draw Information**: Get details about the last Eurojackpot draw, including the jackpot prize, total deposit, and total potential profit.
+
+<div style="text-align:center;">
+    <img src="Assets/1.png" alt="Last Draw Summary" width="500"/>
+</div>
+
 - **Next Draw Prediction**: View the predicted potential profit for the next draw based on historical data and trends.
+
+<div style="text-align:center;">
+    <img src="Assets/2.png" alt="Last Draw Summary" width="500"/>
+</div>
+
 - **Previous Draw Insights**: Access information about previous draws to analyze trends and patterns in lottery participation.
+
+<div style="text-align:center;">
+    <img src="Assets/3.png"  width="500"/>
+</div>
+
 - **Profit Estimation**: Estimate how many draws are needed to reach a target potential profit based on the current jackpot rollover situation.
+
+<div style="text-align:center;">
+    <img src="Assets/4.png"  width="500"/>
+</div>
 
 ## How It Works
 
